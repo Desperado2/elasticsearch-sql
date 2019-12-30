@@ -242,7 +242,7 @@ public class ElasticSearchConnection implements Connection {
 
     @Override
     public boolean isValid(int timeout) throws SQLException {
-        return false;
+        return true;
     }
 
     @Override

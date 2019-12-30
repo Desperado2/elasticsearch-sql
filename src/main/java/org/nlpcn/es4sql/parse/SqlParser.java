@@ -12,14 +12,7 @@ import com.alibaba.druid.sql.ast.expr.SQLListExpr;
 import com.alibaba.druid.sql.ast.expr.SQLMethodInvokeExpr;
 import com.alibaba.druid.sql.ast.expr.SQLPropertyExpr;
 import com.alibaba.druid.sql.ast.expr.SQLQueryExpr;
-import com.alibaba.druid.sql.ast.statement.SQLDeleteStatement;
-import com.alibaba.druid.sql.ast.statement.SQLExprTableSource;
-import com.alibaba.druid.sql.ast.statement.SQLJoinTableSource;
-import com.alibaba.druid.sql.ast.statement.SQLSelectGroupByClause;
-import com.alibaba.druid.sql.ast.statement.SQLSelectItem;
-import com.alibaba.druid.sql.ast.statement.SQLSelectOrderByItem;
-import com.alibaba.druid.sql.ast.statement.SQLTableSource;
-import com.alibaba.druid.sql.ast.statement.SQLUnionQuery;
+import com.alibaba.druid.sql.ast.statement.*;
 import com.alibaba.druid.sql.dialect.mysql.ast.expr.MySqlOrderingExpr;
 import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlDeleteStatement;
 import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlSelectQueryBlock;
@@ -57,18 +50,18 @@ public class SqlParser {
     }
 
     public Select parseSelect(SQLQueryExpr mySqlExpr) throws SqlParseException {
-        MySqlSelectQueryBlock query = (MySqlSelectQueryBlock) mySqlExpr.getSubQuery().getQuery();
-        SubQueryParser subQueryParser = new SubQueryParser(this);
-        if (subQueryParser.containSubqueryInFrom(query)) {
-            return subQueryParser.parseSubQueryInFrom(query);
-        } else {
-            return parseSelect(query);
-        }
 //        MySqlSelectQueryBlock query = (MySqlSelectQueryBlock) mySqlExpr.getSubQuery().getQuery();
-//
-//        Select select = parseSelect(query);
-//
-//        return select;
+//        SubQueryParser subQueryParser = new SubQueryParser(this);
+//        if (subQueryParser.containSubqueryInFrom(query)) {
+//            return subQueryParser.parseSubQueryInFrom(query);
+//        } else {
+//            return parseSelect(query);
+//        }
+        MySqlSelectQueryBlock query = (MySqlSelectQueryBlock) mySqlExpr.getSubQuery().getQuery();
+
+        Select select = parseSelect(query);
+
+        return select;
     }
 
     /**
@@ -286,7 +279,7 @@ public class SqlParser {
      * @param from the from clause.
      * @return list of From objects represents all the sources.
      */
-    private List<From> findFrom(SQLTableSource from) {
+    private List<From> findFrom(SQLTableSource from) throws SqlParseException {
         //zhongshu-comment class1.isAssignableFrom(class2) class2是不是class1的子类或者子接口
         //改成用instanceof 应该也行吧：from instanceof SQLExprTableSource
         boolean isSqlExprTable = from.getClass().isAssignableFrom(SQLExprTableSource.class);
@@ -302,6 +295,19 @@ public class SqlParser {
             return fromList;
         }
 
+//        SubQueryParser subQueryParser = new SubQueryParser(this);
+//        MySqlSelectQueryBlock query =  (MySqlSelectQueryBlock) ((SQLSubqueryTableSource) from).getSelect().getQuery();
+//        if (subQueryParser.containSubqueryInFrom(query)) {
+//            subQueryParser.parseSubQueryInFrom(query);
+//        }
+
+        boolean isSQLSubqueryTableSource = from.getClass().isAssignableFrom(SQLSubqueryTableSource.class);
+        if(isSQLSubqueryTableSource){
+            SQLSubqueryTableSource sqlSubqueryTableSource = (SQLSubqueryTableSource) from;
+            SQLSelectQueryBlock queryBlock = sqlSubqueryTableSource.getSelect().getQueryBlock();
+            SQLTableSource from1 = queryBlock.getFrom();
+            return findFrom(from1);
+        }
         SQLJoinTableSource joinTableSource = ((SQLJoinTableSource) from);
         List<From> fromList = new ArrayList<>();
         fromList.addAll(findFrom(joinTableSource.getLeft()));
@@ -501,7 +507,7 @@ public class SqlParser {
         }
     }
 
-    private List<From> findJoinedFrom(SQLTableSource from) {
+    private List<From> findJoinedFrom(SQLTableSource from) throws SqlParseException {
         SQLJoinTableSource joinTableSource = ((SQLJoinTableSource) from);
         List<From> fromList = new ArrayList<>();
         fromList.addAll(findFrom(joinTableSource.getLeft()));

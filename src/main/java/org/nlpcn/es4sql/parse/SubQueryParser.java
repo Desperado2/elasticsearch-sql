@@ -41,12 +41,7 @@ public class SubQueryParser {
         assert query.getFrom() instanceof SQLSubqueryTableSource;
         MySqlSelectQueryBlock query1 = (MySqlSelectQueryBlock) ((SQLSubqueryTableSource) query.getFrom()).getSelect()
                 .getQuery();
-        Select select = null;
-        if (containSubqueryInFrom(query1)){
-            select = sqlParser.parseSelect(query1);
-        }else{
-            select = sqlParser.parseSelect(query1);
-        }
+        Select select = sqlParser.parseSelect(query1);
         String subQueryAlias = query.getFrom().getAlias();
         return pushSelect(query.getSelectList(), select, subQueryAlias);
     }

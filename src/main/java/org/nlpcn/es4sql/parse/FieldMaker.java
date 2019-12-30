@@ -196,6 +196,8 @@ public class FieldMaker {
             if (name.startsWith(aliasPrefix)) {
                 newFieldName = name.replaceFirst(aliasPrefix, "");
                 field = new Field(newFieldName, alias);
+            }else{
+                field = new Field(newFieldName, alias);
             }
         }
 
