@@ -4,11 +4,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import com.carrotsearch.hppc.cursors.ObjectObjectCursor;
 import com.google.common.collect.Lists;
 import org.elasticsearch.action.search.SearchAction;
 import org.elasticsearch.action.search.SearchRequestBuilder;
 import org.elasticsearch.action.search.SearchType;
 import org.elasticsearch.client.Client;
+import org.elasticsearch.cluster.metadata.MappingMetaData;
+import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.join.aggregations.JoinAggregationBuilders;
 import org.elasticsearch.search.aggregations.AggregationBuilder;
@@ -18,12 +21,7 @@ import org.elasticsearch.search.aggregations.bucket.nested.NestedAggregationBuil
 import org.elasticsearch.search.aggregations.bucket.nested.ReverseNestedAggregationBuilder;
 import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
 import org.elasticsearch.search.sort.SortOrder;
-import org.nlpcn.es4sql.domain.Field;
-import org.nlpcn.es4sql.domain.KVValue;
-import org.nlpcn.es4sql.domain.MethodField;
-import org.nlpcn.es4sql.domain.Order;
-import org.nlpcn.es4sql.domain.Select;
-import org.nlpcn.es4sql.domain.Where;
+import org.nlpcn.es4sql.domain.*;
 import org.nlpcn.es4sql.domain.hints.Hint;
 import org.nlpcn.es4sql.domain.hints.HintType;
 import org.nlpcn.es4sql.exception.SqlParseException;
@@ -48,6 +46,8 @@ public class AggregationQueryAction extends QueryAction {
     public SqlElasticSearchRequestBuilder explain() throws SqlParseException {
 //        this.request = client.prepareSearch();//zhongshu-comment elastic6.1.1的写法
         this.request = new SearchRequestBuilder(client, SearchAction.INSTANCE); //zhongshu-comment master的写法
+        String index = select.getFrom().get(0).getIndex();
+        List<String> mapping = getMapping(index);
 
         setIndicesAndTypes();
 
@@ -60,7 +60,7 @@ public class AggregationQueryAction extends QueryAction {
 
                 //zhongshu-comment 使得group by可以使用select子句中字段的别名
                 //make groupby can reference to field alias
-                lastAgg = getGroupAgg(field, select);
+                lastAgg = getGroupAgg(field, select,mapping);
 
                 /*
                 zhongshu-comment 假如limit是比200小，那shard size就设为5000，
@@ -86,7 +86,7 @@ public class AggregationQueryAction extends QueryAction {
                 if (field.isNested()) {
                     AggregationBuilder nestedBuilder = createNestedAggregation(field);
 
-                    if (insertFilterIfExistsAfter(lastAgg, groupBy, nestedBuilder, 1)) {
+                    if (insertFilterIfExistsAfter(lastAgg, groupBy, nestedBuilder, 1,mapping)) {
                         groupBy.remove(1);
                     } else {
                         nestedBuilder.subAggregation(lastAgg);
@@ -96,7 +96,7 @@ public class AggregationQueryAction extends QueryAction {
                 } else if (field.isChildren()) {
                     AggregationBuilder childrenBuilder = createChildrenAggregation(field);
 
-                    if (insertFilterIfExistsAfter(lastAgg, groupBy, childrenBuilder, 1)) {
+                    if (insertFilterIfExistsAfter(lastAgg, groupBy, childrenBuilder, 1,mapping)) {
                         groupBy.remove(1);
                     } else {
                         childrenBuilder.subAggregation(lastAgg);
@@ -110,7 +110,7 @@ public class AggregationQueryAction extends QueryAction {
                 //zhongshu-comment 下标从1开始
                 for (int i = 1; i < groupBy.size(); i++) {
                     field = groupBy.get(i);
-                    AggregationBuilder subAgg = getGroupAgg(field, select);
+                    AggregationBuilder subAgg = getGroupAgg(field, select,mapping);
                       //ES5.0 termsaggregation with size = 0 not supported anymore
 //                    if (subAgg instanceof TermsAggregationBuilder && !(field instanceof MethodField)) {
 
@@ -121,7 +121,7 @@ public class AggregationQueryAction extends QueryAction {
                     if (field.isNested()) {
                         AggregationBuilder nestedBuilder = createNestedAggregation(field);
 
-                        if (insertFilterIfExistsAfter(subAgg, groupBy, nestedBuilder, i + 1)) {
+                        if (insertFilterIfExistsAfter(subAgg, groupBy, nestedBuilder, i + 1,mapping)) {
                             groupBy.remove(i + 1);
                             i++;
                         } else {
@@ -132,7 +132,7 @@ public class AggregationQueryAction extends QueryAction {
                     } else if (field.isChildren()) {
                         AggregationBuilder childrenBuilder = createChildrenAggregation(field);
 
-                        if (insertFilterIfExistsAfter(subAgg, groupBy, childrenBuilder, i + 1)) {
+                        if (insertFilterIfExistsAfter(subAgg, groupBy, childrenBuilder, i + 1,mapping)) {
                             groupBy.remove(i + 1);
                             i++;
                         } else {
@@ -252,7 +252,7 @@ public class AggregationQueryAction extends QueryAction {
         }
     }
 
-    private AggregationBuilder getGroupAgg(Field field, Select select2) throws SqlParseException {
+    private AggregationBuilder getGroupAgg(Field field, Select select2,List<String> mapping) throws SqlParseException {
         boolean refrence = false;
         AggregationBuilder lastAgg = null;
         for (Field temp : select.getFields()) {
@@ -260,7 +260,7 @@ public class AggregationQueryAction extends QueryAction {
                 MethodField scriptField = (MethodField) temp;
                 for (KVValue kv : scriptField.getParams()) {
                     if (kv.value.equals(field.getName())) {
-                        lastAgg = aggMaker.makeGroupAgg(scriptField);
+                        lastAgg = aggMaker.makeGroupAgg(scriptField,mapping);
                         refrence = true;
                         break;
                     }
@@ -277,8 +277,10 @@ public class AggregationQueryAction extends QueryAction {
              }
          }
          */
-        if (!refrence)
-            lastAgg = aggMaker.makeGroupAgg(field);
+        if (!refrence){
+            lastAgg = aggMaker.makeGroupAgg(field,mapping);
+        }
+
         
         return lastAgg;
     }
@@ -355,13 +357,13 @@ public class AggregationQueryAction extends QueryAction {
         return prefix + "@CHILDREN";
     }
 
-    private boolean insertFilterIfExistsAfter(AggregationBuilder agg, List<Field> groupBy, AggregationBuilder builder, int nextPosition) throws SqlParseException {
+    private boolean insertFilterIfExistsAfter(AggregationBuilder agg, List<Field> groupBy, AggregationBuilder builder, int nextPosition,List<String> mapping) throws SqlParseException {
         if (groupBy.size() <= nextPosition) return false;
         Field filterFieldCandidate = groupBy.get(nextPosition);
         if (!(filterFieldCandidate instanceof MethodField)) return false;
         MethodField methodField = (MethodField) filterFieldCandidate;
         if (!methodField.getName().toLowerCase().equals("filter")) return false;
-        builder.subAggregation(aggMaker.makeGroupAgg(filterFieldCandidate).subAggregation(agg));
+        builder.subAggregation(aggMaker.makeGroupAgg(filterFieldCandidate,mapping).subAggregation(agg));
         return true;
     }
 
@@ -497,4 +499,31 @@ public class AggregationQueryAction extends QueryAction {
         return false;
     }
 
+
+    public List<String> getMapping(String index){
+        List<String> list = new ArrayList<>();
+        ImmutableOpenMap<String, MappingMetaData> mappings = client
+                .admin()
+                .cluster()
+                .prepareState()
+                .execute()
+                .actionGet()
+                .getState()
+                .getMetaData()
+                .getIndices()
+                .get(index)
+                .getMappings();
+        for (ObjectObjectCursor<String, MappingMetaData> cursor : mappings) {
+            Map<String, Object> sourceAsMap = cursor.value.getSourceAsMap();
+            Map<String,Object> properties = (Map<String, Object>) sourceAsMap.get("properties");
+            for (String key : properties.keySet()){
+                Map<String,Object> o = (Map<String, Object>) properties.get(key);
+                if(o.get("type").equals("text")){
+                    list.add(key);
+                }
+            }
+
+        }
+        return list;
+    }
 }

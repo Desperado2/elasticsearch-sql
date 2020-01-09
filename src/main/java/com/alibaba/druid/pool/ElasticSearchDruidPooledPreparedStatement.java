@@ -1,6 +1,9 @@
 package com.alibaba.druid.pool;
 
+import com.carrotsearch.hppc.cursors.ObjectObjectCursor;
 import org.elasticsearch.client.Client;
+import org.elasticsearch.cluster.metadata.MappingMetaData;
+import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.plugin.nlpcn.QueryActionElasticExecutor;
 import org.elasticsearch.plugin.nlpcn.executors.CsvExtractorException;
 import org.nlpcn.es4sql.SearchDao;
@@ -13,6 +16,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Created by allwefantasy on 8/30/16.
@@ -86,7 +90,6 @@ public class ElasticSearchDruidPooledPreparedStatement extends DruidPooledPrepar
 
     private ObjectResult getObjectResult(boolean flat, boolean includeScore, boolean includeType, boolean includeId) throws SqlParseException, SQLFeatureNotSupportedException, Exception, CsvExtractorException {
         SearchDao searchDao = new org.nlpcn.es4sql.SearchDao(client);
-
         String query = ((ElasticSearchPreparedStatement) getRawPreparedStatement()).getExecutableSql();
         QueryAction queryAction = searchDao.explain(query);
         Object execution = QueryActionElasticExecutor.executeAnyAction(searchDao.getClient(), queryAction);
@@ -97,4 +100,7 @@ public class ElasticSearchDruidPooledPreparedStatement extends DruidPooledPrepar
     public int executeUpdate() throws SQLException {
         throw new SQLException("executeUpdate not support in ElasticSearch");
     }
+
+
+
 }

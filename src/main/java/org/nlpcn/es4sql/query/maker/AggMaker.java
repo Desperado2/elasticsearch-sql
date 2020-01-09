@@ -62,7 +62,7 @@ public class AggMaker {
      * @return
      * @throws SqlParseException
      */
-    public AggregationBuilder makeGroupAgg(Field field) throws SqlParseException {
+    public AggregationBuilder makeGroupAgg(Field field,List<String> mapping) throws SqlParseException {
 
         //zhongshu-comment script类型的MethodField
         if (field instanceof MethodField && field.getName().equals("script")) {
@@ -94,7 +94,13 @@ public class AggMaker {
                     }
                 }
              */
-            TermsAggregationBuilder termsBuilder = AggregationBuilders.terms(methodField.getAlias()).script(new Script(methodField.getParams().get(1).value.toString()));
+            TermsAggregationBuilder termsBuilder = null;
+            if(mapping.contains(field.getName())){
+                termsBuilder = AggregationBuilders.terms(methodField.getAlias()).script(new Script(methodField.getParams().get(1).value.toString()+".keyword"));
+            }else {
+                 termsBuilder = AggregationBuilders.terms(methodField.getAlias()).script(new Script(methodField.getParams().get(1).value.toString()));
+            }
+
 
             //question 这里为什么要将这些信息加到groupMap中？
             groupMap.put(methodField.getAlias(), new KVValue("KEY", termsBuilder));
@@ -114,7 +120,12 @@ public class AggMaker {
             }
             return makeRangeGroup(methodField);
         } else {
-            TermsAggregationBuilder termsBuilder = AggregationBuilders.terms(field.getName()).field(field.getName());
+            TermsAggregationBuilder termsBuilder = null ;
+            if(mapping.contains(field.getName())){
+                 termsBuilder = AggregationBuilders.terms(field.getName()).field(field.getName() + ".keyword");
+            }else {
+                 termsBuilder = AggregationBuilders.terms(field.getName()).field(field.getName());
+            }
             groupMap.put(field.getName(), new KVValue("KEY", termsBuilder));
             return termsBuilder;
         }
