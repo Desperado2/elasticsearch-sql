@@ -1,12 +1,12 @@
 package org.nlpcn.es4sql.query;
 
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.ArrayList;
+import java.util.*;
 
+import com.carrotsearch.hppc.cursors.ObjectObjectCursor;
 import org.elasticsearch.action.search.*;
 import org.elasticsearch.client.Client;
+import org.elasticsearch.cluster.metadata.MappingMetaData;
+import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.index.query.BoolQueryBuilder;
 import org.elasticsearch.script.Script;
@@ -70,12 +70,14 @@ public class DefaultQueryAction extends QueryAction {
 		 */
         this.request = new SearchRequestBuilder(client, SearchAction.INSTANCE);
 		setIndicesAndTypes();
+		String index = select.getFrom().get(0).getIndex();
+		List<String> mapping = getMapping(index);
 
 		//zhongshu-comment 将Select对象中封装的sql token信息转换并传到成员变量es搜索请求对象request中
 		setFields(select.getFields());
 
 		setWhere(select.getWhere());
-		setSorts(select.getOrderBys());
+		setSorts(select.getOrderBys(), mapping);
 		setLimit(select.getOffset(), select.getRowCount());
 
         //
@@ -206,10 +208,16 @@ public class DefaultQueryAction extends QueryAction {
 	 * @param orderBys
 	 *            list of Order object
 	 */
-	private void setSorts(List<Order> orderBys) {
+	private void setSorts(List<Order> orderBys,List<String> mapping) {
 		for (Order order : orderBys) {
             if (order.getNestedPath() != null) {
-                request.addSort(SortBuilders.fieldSort(order.getName()).order(SortOrder.valueOf(order.getType())).setNestedSort(new NestedSortBuilder(order.getNestedPath())));
+				String[] split = order.getName().split("\\.");
+				order.setName(split[split.length - 1]);
+            	if(mapping.contains(order.getName())){
+					request.addSort(SortBuilders.fieldSort(order.getName() +".keyword").order(SortOrder.valueOf(order.getType())).setNestedSort(new NestedSortBuilder(order.getNestedPath())));
+				}else{
+					request.addSort(SortBuilders.fieldSort(order.getName()).order(SortOrder.valueOf(order.getType())).setNestedSort(new NestedSortBuilder(order.getNestedPath())));
+				}
             } else if (order.getName().contains("script(")) { //zhongshu-comment 该分支是我后来加的，用于兼容order by case when那种情况
 
 				String scriptStr = order.getName().substring("script(".length(), order.getName().length() - 1);
@@ -219,9 +227,17 @@ public class DefaultQueryAction extends QueryAction {
 				scriptSortBuilder = scriptSortBuilder.order(SortOrder.valueOf(order.getType()));
 				request.addSort(scriptSortBuilder);
 			} else {
-                request.addSort(
-                		order.getName(),
-						SortOrder.valueOf(order.getType()));
+				String[] split = order.getName().split("\\.");
+				order.setName(split[split.length - 1]);
+				if(mapping.contains(order.getName())){
+					request.addSort(
+							order.getName() +".keyword",
+							SortOrder.valueOf(order.getType()));
+				}else{
+					request.addSort(
+							order.getName(),
+							SortOrder.valueOf(order.getType()));
+				}
             }
 		}
 	}
@@ -249,4 +265,33 @@ public class DefaultQueryAction extends QueryAction {
     public List<String> getFieldNames() {
         return fieldNames;
     }
+
+
+
+	public List<String> getMapping(String index){
+		List<String> list = new ArrayList<>();
+		ImmutableOpenMap<String, MappingMetaData> mappings = client
+				.admin()
+				.cluster()
+				.prepareState()
+				.execute()
+				.actionGet()
+				.getState()
+				.getMetaData()
+				.getIndices()
+				.get(index)
+				.getMappings();
+		for (ObjectObjectCursor<String, MappingMetaData> cursor : mappings) {
+			Map<String, Object> sourceAsMap = cursor.value.getSourceAsMap();
+			Map<String,Object> properties = (Map<String, Object>) sourceAsMap.get("properties");
+			for (String key : properties.keySet()){
+				Map<String,Object> o = (Map<String, Object>) properties.get(key);
+				if(o.get("type").equals("text")){
+					list.add(key);
+				}
+			}
+
+		}
+		return list;
+	}
 }
