@@ -49,7 +49,7 @@ public class ESActionFactory {
 			    //zhongshu-comment 将sql字符串解析成AST，即SQLQueryExpr sqlExpr就是AST了，下面的代码就开始访问AST、从中获取token
 				SQLQueryExpr sqlExpr = (SQLQueryExpr) toSqlExpr(sql);
                 if(isMulti(sqlExpr)){//zhongshu-comment 判断是不是union查询，union查询两个select语句，btw：子查询也有多个select语句，至少2个
-                    MultiQuerySelect multiSelect = new SqlParser().parseMultiSelect((SQLUnionQuery) sqlExpr.getSubQuery().getQuery());
+                    MultiQuerySelect multiSelect = new SqlParser().parseMultiSelect(client,(SQLUnionQuery) sqlExpr.getSubQuery().getQuery());
                     handleSubQueries(client,multiSelect.getFirstSelect());
                     handleSubQueries(client,multiSelect.getSecondSelect());
                     return new MultiQueryAction(client, multiSelect);
@@ -62,7 +62,8 @@ public class ESActionFactory {
                 }
                 else {
                     //zhongshu-comment 大部分查询都是走这个分支，先看懂这个分支
-                    Select select = new SqlParser().parseSelect(sqlExpr);
+
+                    Select select = new SqlParser().parseSelect(client,sqlExpr);
                     //todo 看不懂，测试了好几个常见的sql，都没有进去handleSubQueries该方法，那就先不理了，看别的
                     handleSubQueries(client, select);
                     return handleSelect(client, select);

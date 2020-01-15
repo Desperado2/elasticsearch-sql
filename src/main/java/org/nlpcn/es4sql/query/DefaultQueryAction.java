@@ -88,6 +88,7 @@ public class DefaultQueryAction extends QueryAction {
         } else {
             request.setSearchType(SearchType.DFS_QUERY_THEN_FETCH);
         }
+        this.request.setSearchType(SearchType.DFS_QUERY_THEN_FETCH);
         updateRequestWithIndexAndRoutingOptions(select, request);
 		updateRequestWithHighlight(select, request);
 		updateRequestWithCollapse(select, request);
@@ -135,6 +136,7 @@ public class DefaultQueryAction extends QueryAction {
 						script类型的MethodField是不会加到include和exclude中的
 						 */
 						handleScriptField(method);
+						includeFields.addAll(fieldNames);
 					} else if (method.getName().equalsIgnoreCase("include")) {
 					    String f;
 						for (KVValue kvValue : method.getParams()) {
@@ -287,7 +289,9 @@ public class DefaultQueryAction extends QueryAction {
 			for (String key : properties.keySet()){
 				Map<String,Object> o = (Map<String, Object>) properties.get(key);
 				if(o.get("type").equals("text")){
-					list.add(key);
+					if(!o.containsKey("fielddata")){
+						list.add(key);
+					}
 				}
 			}
 

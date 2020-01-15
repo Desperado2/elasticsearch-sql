@@ -134,6 +134,12 @@
             <artifactId>jts</artifactId>
             <version>1.13</version>
         </dependency>
+        <dependency>
+            <groupId>org.elasticsearch</groupId>
+            <artifactId>elasticsearch</artifactId>
+            <version>6.1.1</version>
+            <scope>compile</scope>
+        </dependency>
     </dependencies>
 
 

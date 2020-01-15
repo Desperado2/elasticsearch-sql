@@ -90,8 +90,11 @@ public class Util {
         throw new SqlParseException("could not parse sqlBinaryOpExpr need to be identifier/valuable got" + expr.getClass().toString() + " with value:" + expr.toString());
     }
 
-    public static Object getScriptValueWithQuote(SQLExpr expr, String quote) throws SqlParseException {
+    public static Object getScriptValueWithQuote(List<String> mapping,SQLExpr expr, String quote) throws SqlParseException {
         if (expr instanceof SQLIdentifierExpr || expr instanceof SQLPropertyExpr || expr instanceof SQLVariantRefExpr) {
+            if(mapping.contains(expr.toString())){
+                return "doc['" + expr.toString() + ".keyword'].value";
+            }
             return "doc['" + expr.toString() + "'].value";
         }  else if (expr instanceof SQLCharExpr) {
             return quote + ((SQLCharExpr) expr).getValue() + quote;

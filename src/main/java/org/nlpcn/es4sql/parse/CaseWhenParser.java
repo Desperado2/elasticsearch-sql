@@ -23,12 +23,13 @@ public class CaseWhenParser {
     //zhongshu-comment 以下这两个属性貌似没有被使用
     private String alias;
     private String tableAlias;
+    private List<String> mapping;
 
-    public CaseWhenParser(SQLCaseExpr caseExpr, String alias, String tableAlias) {
+    public CaseWhenParser(List<String> mapping,SQLCaseExpr caseExpr, String alias, String tableAlias) {
         this.alias = alias;
         this.tableAlias = tableAlias;
         this.caseExpr = caseExpr;
-
+        this.mapping = mapping;
     }
 
     public String parse() throws SqlParseException {
@@ -54,9 +55,9 @@ public class CaseWhenParser {
                 scriptCode = scriptCode.substring(3);
             }
             if (result.size() == 0) {
-                result.add("if(" + scriptCode + ")" + "{" + Util.getScriptValueWithQuote(item.getValueExpr(), "'") + "}");
+                result.add("if(" + scriptCode + ")" + "{" + Util.getScriptValueWithQuote(mapping,item.getValueExpr(), "'") + "}");
             } else {
-                result.add("else if(" + scriptCode + ")" + "{" + Util.getScriptValueWithQuote(item.getValueExpr(), "'") + "}");
+                result.add("else if(" + scriptCode + ")" + "{" + Util.getScriptValueWithQuote(mapping,item.getValueExpr(), "'") + "}");
             }
 
         }
@@ -64,7 +65,7 @@ public class CaseWhenParser {
         if (elseExpr == null) {
             result.add("else { null }");
         } else {
-            result.add("else {" + Util.getScriptValueWithQuote(elseExpr, "'") + "}");
+            result.add("else {" + Util.getScriptValueWithQuote(mapping,elseExpr, "'") + "}");
         }
 
         return Joiner.on(" ").join(result);
@@ -95,9 +96,9 @@ public class CaseWhenParser {
                 scriptCode = scriptCode.substring(3);
             }
             if (result.size() == 1) { //zhongshu-comment 在for循环之前就已经先add了一个元素
-                result.add("if(" + scriptCode + ")" + "{" + TMP + "=" + Util.getScriptValueWithQuote(item.getValueExpr(), "'") + "}");
+                result.add("if(" + scriptCode + ")" + "{" + TMP + "=" + Util.getScriptValueWithQuote(mapping,item.getValueExpr(), "'") + "}");
             } else {
-                result.add("else if(" + scriptCode + ")" + "{" + TMP + "=" + Util.getScriptValueWithQuote(item.getValueExpr(), "'") + "}");
+                result.add("else if(" + scriptCode + ")" + "{" + TMP + "=" + Util.getScriptValueWithQuote(mapping,item.getValueExpr(), "'") + "}");
             }
 
         }
@@ -105,7 +106,7 @@ public class CaseWhenParser {
         if (elseExpr == null) {
             result.add("else { null }");
         } else {
-            result.add("else {" + TMP + "=" + Util.getScriptValueWithQuote(elseExpr, "'") + "}");
+            result.add("else {" + TMP + "=" + Util.getScriptValueWithQuote(mapping,elseExpr, "'") + "}");
         }
 
         /*
@@ -175,7 +176,7 @@ public class CaseWhenParser {
                     codes.add("(" + "doc['" + nameExpr.toString() + "']" + ".empty)");
                 } else {
                     //zhongshu-comment 该分支示例：(doc['c'].value==1)
-                    codes.add("(" + Util.getScriptValueWithQuote(nameExpr, "'") + condition.getOpertatorSymbol() + Util.getScriptValueWithQuote(valueExpr, "'") + ")");
+                    codes.add("(" + Util.getScriptValueWithQuote(mapping,nameExpr, "'") + condition.getOpertatorSymbol() + Util.getScriptValueWithQuote(mapping,valueExpr, "'") + ")");
                 }
             }
         } else {

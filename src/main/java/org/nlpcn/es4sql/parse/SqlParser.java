@@ -16,6 +16,11 @@ import com.alibaba.druid.sql.ast.statement.*;
 import com.alibaba.druid.sql.dialect.mysql.ast.expr.MySqlOrderingExpr;
 import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlDeleteStatement;
 import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlSelectQueryBlock;
+import com.carrotsearch.hppc.cursors.ObjectObjectCursor;
+import org.elasticsearch.client.Client;
+import org.elasticsearch.cluster.metadata.MappingMetaData;
+import org.elasticsearch.common.collect.ImmutableOpenMap;
+import org.elasticsearch.index.mapper.Mapping;
 import org.elasticsearch.search.sort.ScriptSortBuilder;
 import org.nlpcn.es4sql.domain.Condition;
 import org.nlpcn.es4sql.domain.Delete;
@@ -49,7 +54,7 @@ public class SqlParser {
 
     }
 
-    public Select parseSelect(SQLQueryExpr mySqlExpr) throws SqlParseException {
+    public Select parseSelect(Client client, SQLQueryExpr mySqlExpr) throws SqlParseException {
 //        MySqlSelectQueryBlock query = (MySqlSelectQueryBlock) mySqlExpr.getSubQuery().getQuery();
 //        SubQueryParser subQueryParser = new SubQueryParser(this);
 //        if (subQueryParser.containSubqueryInFrom(query)) {
@@ -59,7 +64,7 @@ public class SqlParser {
 //        }
         MySqlSelectQueryBlock query = (MySqlSelectQueryBlock) mySqlExpr.getSubQuery().getQuery();
 
-        Select select = parseSelect(query);
+        Select select = parseSelect(client,query);
 
         return select;
     }
@@ -70,7 +75,7 @@ public class SqlParser {
      * @return
      * @throws SqlParseException
      */
-    public Select parseSelect(MySqlSelectQueryBlock query) throws SqlParseException {
+    public Select parseSelect(Client client,MySqlSelectQueryBlock query) throws SqlParseException {
 
         Select select = new Select();
         /*zhongshu-comment SqlParser类没有成员变量，里面全是方法，所以将this传到WhereParser对象时是无状态的，
@@ -83,7 +88,11 @@ public class SqlParser {
         zhongshu-comment 例如sql：select   a,sum(b),case when c='a' then 1 else 2 end as my_c from tbl，
         那findSelect()就是解析这一部分了：a,sum(b),case when c='a' then 1 else 2 end as my_c
          */
-        findSelect(query, select, query.getFrom().getAlias()); //zhongshu-comment 看过
+        List<From> froms = findFrom(query.getFrom());
+        String index = froms.get(0).getIndex();
+        List<String> mapping = getMapping(client, index);
+
+        findSelect(mapping,query, select, query.getFrom().getAlias()); //zhongshu-comment 看过
 
         select.getFrom().addAll(findFrom(query.getFrom())); //zhongshu-comment 看过
 
@@ -105,9 +114,9 @@ public class SqlParser {
         findLimit(query.getLimit(), select);
 
         //zhongshu-comment 和那个_score有关
-        findOrderBy(query, select); //zhongshu-comment 还没看
+        findOrderBy(mapping,query, select); //zhongshu-comment 还没看
 
-        findGroupBy(query, select); //zhongshu-comment aggregations
+        findGroupBy(mapping,query, select); //zhongshu-comment aggregations
         return select;
     }
 
@@ -126,21 +135,21 @@ public class SqlParser {
         return delete;
     }
 
-    public MultiQuerySelect parseMultiSelect(SQLUnionQuery query) throws SqlParseException {
-        Select firstTableSelect = this.parseSelect((MySqlSelectQueryBlock) query.getLeft());
-        Select secondTableSelect = this.parseSelect((MySqlSelectQueryBlock) query.getRight());
+    public MultiQuerySelect parseMultiSelect(Client client,SQLUnionQuery query) throws SqlParseException {
+        Select firstTableSelect = this.parseSelect(client,(MySqlSelectQueryBlock) query.getLeft());
+        Select secondTableSelect = this.parseSelect(client,(MySqlSelectQueryBlock) query.getRight());
         return new MultiQuerySelect(query.getOperator(),firstTableSelect,secondTableSelect);
     }
 
-    private void findSelect(MySqlSelectQueryBlock query, Select select, String tableAlias) throws SqlParseException {
+    private void findSelect(List<String> mapping,MySqlSelectQueryBlock query, Select select, String tableAlias) throws SqlParseException {
         List<SQLSelectItem> selectList = query.getSelectList();
         for (SQLSelectItem sqlSelectItem : selectList) {
-            Field field = FieldMaker.makeField(sqlSelectItem.getExpr(), sqlSelectItem.getAlias(), tableAlias);
+            Field field = FieldMaker.makeField(mapping,sqlSelectItem.getExpr(), sqlSelectItem.getAlias(), tableAlias);
             select.addField(field);
         }
     }
 
-    private void findGroupBy(MySqlSelectQueryBlock query, Select select) throws SqlParseException {
+    private void findGroupBy(List<String> mappingList,MySqlSelectQueryBlock query, Select select) throws SqlParseException {
         SQLSelectGroupByClause groupBy = query.getGroupBy();
         SQLTableSource sqlTableSource = query.getFrom();
         if (groupBy == null) {
@@ -158,33 +167,33 @@ public class SqlParser {
             if ((sqlExpr instanceof SQLParensIdentifierExpr || !(sqlExpr instanceof SQLIdentifierExpr || sqlExpr instanceof SQLMethodInvokeExpr)) && !standardGroupBys.isEmpty()) {
                 // flush the standard group bys
                 // zhongshu-comment 先将standardGroupBys里面的字段传到select对象的groupBys字段中，然后给standardGroupBys分配一个没有元素的新的list
-                select.addGroupBy(convertExprsToFields(standardGroupBys, sqlTableSource));
+                select.addGroupBy(convertExprsToFields(mappingList,standardGroupBys, sqlTableSource));
                 standardGroupBys = new ArrayList<>();
             }
 
             if (sqlExpr instanceof SQLParensIdentifierExpr) {
                 // single item with parens (should get its own aggregation)
-                select.addGroupBy(FieldMaker.makeField(((SQLParensIdentifierExpr) sqlExpr).getExpr(), null, sqlTableSource.getAlias()));
+                select.addGroupBy(FieldMaker.makeField(mappingList,((SQLParensIdentifierExpr) sqlExpr).getExpr(), null, sqlTableSource.getAlias()));
             } else if (sqlExpr instanceof SQLListExpr) {
                 // multiple items in their own list
                 SQLListExpr listExpr = (SQLListExpr) sqlExpr;
-                select.addGroupBy(convertExprsToFields(listExpr.getItems(), sqlTableSource));
+                select.addGroupBy(convertExprsToFields(mappingList,listExpr.getItems(), sqlTableSource));
             } else {
                 // everything else gets added to the running list of standard group bys
                 standardGroupBys.add(sqlExpr);
             }
         }
         if (!standardGroupBys.isEmpty()) {
-            select.addGroupBy(convertExprsToFields(standardGroupBys, sqlTableSource));
+            select.addGroupBy(convertExprsToFields(mappingList,standardGroupBys, sqlTableSource));
         }
     }
 
-    private List<Field> convertExprsToFields(List<? extends SQLExpr> exprs, SQLTableSource sqlTableSource) throws SqlParseException {
+    private List<Field> convertExprsToFields(List<String> mapping,List<? extends SQLExpr> exprs, SQLTableSource sqlTableSource) throws SqlParseException {
         List<Field> fields = new ArrayList<>(exprs.size());
         for (SQLExpr expr : exprs) {
             //here we suppose groupby field will not have alias,so set null in second parameter
             //zhongshu-comment case when 有别名过不了语法解析，没有别名执行下面语句会报空指针
-            fields.add(FieldMaker.makeField(expr, null, sqlTableSource.getAlias()));
+            fields.add(FieldMaker.makeField(mapping,expr, null, sqlTableSource.getAlias()));
         }
         return fields;
     }
@@ -218,7 +227,7 @@ public class SqlParser {
         return firstAlias;
     }
 
-    private void findOrderBy(MySqlSelectQueryBlock query, Select select) throws SqlParseException {
+    private void findOrderBy(List<String> mapping,MySqlSelectQueryBlock query, Select select) throws SqlParseException {
         SQLOrderBy orderBy = query.getOrderBy();
 
         if (orderBy == null) {
@@ -226,14 +235,14 @@ public class SqlParser {
         }
         List<SQLSelectOrderByItem> items = orderBy.getItems();
 
-        addOrderByToSelect(select, items, null);
+        addOrderByToSelect(mapping,select, items, null);
 
     }
 
-    private void addOrderByToSelect(Select select, List<SQLSelectOrderByItem> items, String alias) throws SqlParseException {
+    private void addOrderByToSelect(List<String> mapping,Select select, List<SQLSelectOrderByItem> items, String alias) throws SqlParseException {
         for (SQLSelectOrderByItem sqlSelectOrderByItem : items) {
             SQLExpr expr = sqlSelectOrderByItem.getExpr();
-            Field f = FieldMaker.makeField(expr, null, null);
+            Field f = FieldMaker.makeField(mapping,expr, null, null);
             String orderByName = f.toString();
 
             if (sqlSelectOrderByItem.getType() == null) {
@@ -332,8 +341,8 @@ public class SqlParser {
         Map<String, List<SQLSelectOrderByItem>> aliasToOrderBy = splitAndFindOrder(query.getOrderBy(), firstTableAlias, secondTableAlias);
         List<Condition> connectedConditions = getConditionsFlatten(joinSelect.getConnectedWhere());
         joinSelect.setConnectedConditions(connectedConditions);
-        fillTableSelectedJoin(joinSelect.getFirstTable(), query, joinedFrom.get(0), aliasToWhere.get(firstTableAlias), aliasToOrderBy.get(firstTableAlias), connectedConditions);
-        fillTableSelectedJoin(joinSelect.getSecondTable(), query, joinedFrom.get(1), aliasToWhere.get(secondTableAlias), aliasToOrderBy.get(secondTableAlias), connectedConditions);
+        fillTableSelectedJoin(null,joinSelect.getFirstTable(), query, joinedFrom.get(0), aliasToWhere.get(firstTableAlias), aliasToOrderBy.get(firstTableAlias), connectedConditions);
+        fillTableSelectedJoin(null,joinSelect.getSecondTable(), query, joinedFrom.get(1), aliasToWhere.get(secondTableAlias), aliasToOrderBy.get(secondTableAlias), connectedConditions);
 
         updateJoinLimit(query.getLimit(), joinSelect);
 
@@ -394,9 +403,9 @@ public class SqlParser {
         return splitWheres(where, firstTableAlias, secondTableAlias);
     }
 
-    private void fillTableSelectedJoin(TableOnJoinSelect tableOnJoin, MySqlSelectQueryBlock query, From tableFrom, Where where, List<SQLSelectOrderByItem> orderBys, List<Condition> conditions) throws SqlParseException {
+    private void fillTableSelectedJoin(List<String> mapping,TableOnJoinSelect tableOnJoin, MySqlSelectQueryBlock query, From tableFrom, Where where, List<SQLSelectOrderByItem> orderBys, List<Condition> conditions) throws SqlParseException {
         String alias = tableFrom.getAlias();
-        fillBasicTableSelectJoin(tableOnJoin, tableFrom, where, orderBys, query);
+        fillBasicTableSelectJoin(mapping,tableOnJoin, tableFrom, where, orderBys, query);
         tableOnJoin.setConnectedFields(getConnectedFields(conditions, alias));
         tableOnJoin.setSelectedFields(new ArrayList<Field>(tableOnJoin.getFields()));
         tableOnJoin.setAlias(alias);
@@ -423,11 +432,11 @@ public class SqlParser {
         return fields;
     }
 
-    private void fillBasicTableSelectJoin(TableOnJoinSelect select, From from, Where where, List<SQLSelectOrderByItem> orderBys, MySqlSelectQueryBlock query) throws SqlParseException {
+    private void fillBasicTableSelectJoin(List<String> mapping,TableOnJoinSelect select, From from, Where where, List<SQLSelectOrderByItem> orderBys, MySqlSelectQueryBlock query) throws SqlParseException {
         select.getFrom().add(from);
-        findSelect(query, select, from.getAlias());
+        findSelect(mapping,query, select, from.getAlias());
         select.setWhere(where);
-        addOrderByToSelect(select, orderBys, from.getAlias());
+        addOrderByToSelect(mapping,select, orderBys, from.getAlias());
     }
 
     private List<Condition> getJoinConditionsFlatten(SQLJoinTableSource from) throws SqlParseException {
@@ -516,4 +525,32 @@ public class SqlParser {
     }
 
 
+    public List<String> getMapping(Client client,String index){
+        List<String> list = new ArrayList<>();
+        ImmutableOpenMap<String, MappingMetaData> mappings = client
+                .admin()
+                .cluster()
+                .prepareState()
+                .execute()
+                .actionGet()
+                .getState()
+                .getMetaData()
+                .getIndices()
+                .get(index)
+                .getMappings();
+        for (ObjectObjectCursor<String, MappingMetaData> cursor : mappings) {
+            Map<String, Object> sourceAsMap = cursor.value.getSourceAsMap();
+            Map<String,Object> properties = (Map<String, Object>) sourceAsMap.get("properties");
+            for (String key : properties.keySet()){
+                Map<String,Object> o = (Map<String, Object>) properties.get(key);
+                if(o.get("type").equals("text")){
+                    if(!o.containsKey("fielddata")){
+                        list.add(key);
+                    }
+                }
+            }
+
+        }
+        return list;
+    }
 }

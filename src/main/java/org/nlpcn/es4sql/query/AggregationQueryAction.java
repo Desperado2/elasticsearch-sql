@@ -212,7 +212,7 @@ public class AggregationQueryAction extends QueryAction {
         //zhongshu-comment 这个要看一下
         setLimitFromHint(this.select.getHints());
 
-        request.setSearchType(SearchType.DEFAULT);
+        request.setSearchType(SearchType.DFS_QUERY_THEN_FETCH);
         updateRequestWithIndexAndRoutingOptions(select, request);
         updateRequestWithHighlight(select, request);
         updateRequestWithCollapse(select, request);
@@ -519,7 +519,9 @@ public class AggregationQueryAction extends QueryAction {
             for (String key : properties.keySet()){
                 Map<String,Object> o = (Map<String, Object>) properties.get(key);
                 if(o.get("type").equals("text")){
-                    list.add(key);
+                    if(!o.containsKey("fielddata")){
+                        list.add(key);
+                    }
                 }
             }
 
